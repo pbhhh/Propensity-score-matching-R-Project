@@ -1,0 +1,304 @@
+---
+title: "The relationship of University Innovation and the Professor's Privilege."
+author: "Bihong Pei"
+date: "2022-11-17"
+output: html_document
+---
+
+```{r}
+# Loading Useful Packages
+library(ggplot2) 
+library(huxtable) 
+library(dplyr)
+library(xtable)
+library(patchwork) # To display 2 charts together
+library(tidyr)
+library(writexl)
+library(data.table)
+library(haven)
+library(gridExtra) 
+library(lfe) 
+library(stargazer) 
+
+library(broom)
+library(purrr)
+```
+
+```{r load data}
+setwd("/Users/peibihong/Desktop") 
+
+startups <- read_stata("aggregate_startups.dta")  # read_dta is used for .dta files
+patents <- read_stata("aggcount_patents.dta")
+startups_by_nace <- read_stata("science_yearly_nace.dta")
+patents_by_techdum <- read_stata("aggcount_tech1.dta")
+```
+
+1. Reproduce Figures 1B and 2B from the paper (the per-capita startups and patents, 2 graphs in total). Make sure you add clear legends and axes titles.
+
+```{r graph 1B}
+# reshape data to wide to make graphs
+startups_wide <- reshape(as.data.frame(startups),
+                   idvar = "yr", # which var is id
+                   direction = "wide", # how you want things reshaped
+                   timevar = "treated",  # which var is repeating
+                   sep = "_")
+# Make Time Series Graph for 1B
+plot_1 <- ggplot(startups_wide) +
+        geom_line(aes(x=yr, y=startups_pc_1, colour = "darkorange2"), linetype = "dashed", size = .8) +
+        #geom_point(aes(x=yr, y=startups_pc_1, colour = "darkorange2"), size = 2) +
+        geom_line(aes(x=yr, y=startups_pc_0*2.5, colour = "royalblue"), size = .8) +
+        #geom_point(aes(x=yr, y=startups_pc_0, colour = "royalblue"), size = 2) +
+        scale_color_identity(name = "", 
+                             breaks = c("darkorange2", "royalblue"), 
+                             labels = c("University", "Non-University"), 
+                             guide = "legend") +
+        theme_bw() + 
+        theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
+        scale_x_continuous(name = "Year of foundation", breaks = seq(2000, 2007, 1))+
+        scale_y_continuous(
+          # Features of the first axis
+          name = "University start-ups, per researcher", 
+           # Add a second axis and specify its features
+          sec.axis = sec_axis(~ ./2.5, name="Non-university start-ups, per Norwegian worker"),
+          limits = c(0, 0.008)
+        ) +
+        xlab("Year of foundation") +
+        ggtitle("Figure 1 - Startups founded in Norway") +
+        theme(plot.title = element_text(hjust = 0.5))+
+        geom_vline(xintercept = 2003, linetype = "dashed", color = "blue", size = .5) +
+  annotate("text",x=2002.5,y=0,label="First year post-reform") +
+        theme(legend.position = "right", legend.text = element_text(size = 10))
+
+plot_1
+```
+
+```{r graph for 2B}
+options(scipen=999)
+# reshape data to wide to make graphs
+patents_wide <- reshape(as.data.frame(patents),
+                   idvar = "appyr", # which var is id
+                   direction = "wide", # how you want things reshaped
+                   timevar = "treated",  # which var is repeating
+                   sep = "_")
+# Make Time Series Graph for 1B
+plot_2 <- ggplot(patents_wide) +
+        geom_line(aes(x=appyr, y=patents_pc_1, colour = "red"), linetype = "dashed", size = .8) +
+        #geom_point(aes(x=appyr, y=patents_pc_1, colour = "darkorange2"), size = 2) +
+        geom_line(aes(x=appyr, y=patents_pc_0*48, colour = "royalblue"), size = .8) +
+        #geom_point(aes(x=appyr, y=patents_pc_0, colour = "royalblue"), size = 2) +
+        scale_color_identity(name = "", 
+                             breaks = c("red", "royalblue"), 
+                             labels = c("University", "Non-University"), 
+                             guide = "legend") +
+        theme_bw() + 
+        theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
+        scale_x_continuous(name = "Year of patent application", breaks = seq(1995, 2009, 2))+
+        scale_y_continuous(
+          # Features of the first axis
+          name = "University patents, per researcher", 
+           # Add a second axis and specify its features
+          sec.axis = sec_axis(~ ./48, name="Non-university patents, per Norwegian worker", breaks = seq(0, 0.00025, 0.00005)),
+          breaks = seq(0, 0.012, 0.004), limits = c(0, 0.014)
+        ) +
+        ggtitle("Figure 2 - Patents applied in Norway") +
+        theme(plot.title = element_text(hjust = 0.5))+
+        geom_vline(xintercept = 2003, linetype = "dashed", color = "blue", size = .5, name = "First year post-reform") +
+  annotate("text",x=2003,y=0,label="First year post-reform")+
+        theme(legend.position = "right", legend.text = element_text(size = 10))
+
+plot_2
+```
+
+2. The difference-in-differences (short, diff-in-diff) design compares changes in patenting after the reform for professors with changes in patenting for a control group of other Norwegians (or other Norwegian PhDs). With individual-level data we could run a t-test to see whether the difference between (Y_u_2003 – Y_u_2002) and (Y_nu_2003 – Y_nu_2002) is statistically significant. While we cannot access the original, individual-level data (for privacy reasons), we can examine the aggregate number of patents per group (professors, other PhDs, other Norwegians) and year.
+
+a. Make a 2x2 table difference-in-differences table comparing the means of patents and start-ups in 2002 and 2003 for the treatment and the control. Explain what you see. Was there a decline in patenting/start-ups for university professors, compared with the control?
+
+```{r table of patents}
+###a
+options(scripen=999)
+t_patents <- patents %>% 
+  filter(appyr==2002 | appyr==2003) %>%
+  select(appyr,treated,patents_pc) 
+t_patents_w<- spread(t_patents,key="treated",value="patents_pc")
+
+t_startups <- startups %>% 
+  filter(yr==2002 | yr==2003) %>%
+  select(yr,treated,startups_pc) 
+t_startups_w<- spread(t_startups,key="treated",value="startups_pc")
+```
+
+b. [Extra credit] Compare how the table for start-ups looks if you create it starting from the aggregate_startups or from the science_yearly_nace datasets: can you identify why they look different?
+```{r QUESTION}
+workers <- startups_by_nace[!duplicated(startups_by_nace[,c("stiftaar","sample", "treated", "n_workers")]),]
+workers <- workers %>% 
+  filter(sample == 0 | sample == 2) %>%
+  group_by(stiftaar, treated) %>% 
+  summarise(workers = sum(n_workers, na.rm = TRUE)) %>% 
+  filter(stiftaar == 2002 | stiftaar == 2003)
+
+startups_nace <- startups_by_nace %>% 
+  filter(stiftaar == 2002 | stiftaar == 2003) %>%
+  select(treated, stiftaar, sample, n_startups) %>%
+  filter(sample == 0 | sample == 2) %>%
+  group_by(stiftaar, treated) %>% 
+  summarise(total = sum(n_startups))  
+
+nace_mean <- merge(startups_nace, workers, by.x = c("stiftaar", "treated"),
+               by.y = c("stiftaar", "treated"), all.x = TRUE)
+
+nace_mean <- nace_mean %>%
+  mutate(startups_pc = total/workers) %>% 
+  select(stiftaar, treated, startups_pc)
+
+startups_mean <- startups %>% 
+  filter(yr == 2002 | yr == 2003) %>%
+  select(yr, treated, startups_pc)
+
+startups_mean
+nace_mean
+
+# The treated group is less than non treatment in 2003.
+# All the numbers become larger because the number of people in non treatment 
+# becomes larger.
+
+# startups_treated = 1 = nace_sample = 0
+# startups_untreated = 0 = nace_sample = 1+2 but what is 1 (work at university 
+# but not reserchers?
+
+# they have same startups but different number of workers, may because we don't 
+# have science_yearly_1. but what is science_yearly_1 and science_yearly_nace?
+
+```
+
+4. While we cannot access the individual-level data that the authors use in their analysis (to protect the privacy of people in the data), we can access data at the industry level. Separately for patents and startups:
+a. Run a t-test to see if the change between 2002 and 2003 is statistically significant. You have to calculate the change in each category of patents/startups and then do a t-test. Report results of this test in a table and discuss it in your text. (Note: Do not take a screenshot of your results,
+make a table.)
+
+```{r t-test for startups}
+startups_by_nace_w <- startups_by_nace %>% filter(sample %in% c(0,2) & 
+                                            stiftaar %in% c(2002,2003)) %>%
+  # n_workers reflects the num. of workers in a given group
+  # (for sample ==0,, it's "University researchers)
+  mutate(startups_p100k = n_startups/n_workers * 100000) %>%
+  select(sample, stiftaar, n1, startups_p100k)
+
+startups_by_nace_w <- reshape(as.data.frame(startups_by_nace_w),
+                              idvar = c("sample", "n1"), # which var is id
+                              direction = "wide", # how you want things reshaped
+                              timevar = "stiftaar",  # which var is repeating
+                              sep = "_")
+
+startups_by_nace_w <- startups_by_nace_w %>% 
+  arrange(sample, n1) %>%
+  mutate(perc_change = startups_p100k_2003/startups_p100k_2002 - 1) %>%
+  mutate(perc_change = replace_na(perc_change, 0)) # it's a choice: zero to zero means 0% growth
+
+t1 <- t.test(perc_change ~sample, 
+       data = startups_by_nace_w, 
+       paired = FALSE)
+t1
+```
+
+```{r t-test for patents}
+patents_by_techdum_w <- patents_by_techdum %>% filter(appyr %in% c(2002,2003)) %>%
+  mutate(patents_p100k = patents_pc * 100000) %>%
+  select(appyr, treated, techdum1, patents_p100k)
+
+patents_by_techdum_w <- reshape(as.data.frame(patents_by_techdum_w),
+                              idvar = c("treated", "techdum1"), # which var is id
+                              direction = "wide", # how you want things reshaped
+                              timevar = "appyr",  # which var is repeating
+                              sep = "_")
+
+patents_by_techdum_w <- patents_by_techdum_w %>% 
+  arrange(treated, techdum1) %>%
+  mutate(perc_change = patents_p100k_2003/patents_p100k_2002 - 1) %>%
+  mutate(perc_change = replace_na(perc_change, 0)) # it's a choice: zero to zero means 0% growth
+
+t2 <- t.test(perc_change ~ treated, 
+       data = patents_by_techdum_w, 
+       paired = FALSE)
+t2
+```
+
+b. What fields/industries drive the change in number of startups created? (Make sure to refer to the
+actual names of industries rather than their codes, see nace_codes.png for that).
+```{r graph for startups QUESTION}
+tab_1 <- map_df(list(t1), tidy)
+industrydelta_1 <- startups_by_nace %>%
+  filter(stiftaar==2002 | stiftaar==2003) %>%
+  filter(sample==0 | sample==2) %>%
+  group_by(n1, stiftaar) %>%
+  mutate(total = sum(n_startups)) %>%
+  summarize(year = as.factor(stiftaar), n1, total) %>% 
+  unique() %>%
+  pivot_wider(names_from = stiftaar, values_from = total) %>%
+  ggplot() +
+  geom_col(aes(x=n1, y=`2002`, color = year, fill = year), position = 'dodge') +
+  geom_col(aes(x=n1, y=`2003`, color = year, fill = year),  position = 'dodge') +
+  labs(title = "Figure 3 - Number of Startups by Industry in 2002 and 2003",
+       x="Industry",
+       y="Number of Startups") +
+  scale_x_continuous(breaks = (0:9))
+
+industrydelta_1
+
+#Question: 0-9 and 1-10 which match which? And can we use this graph to answer 4b directly?
+# 10 is 0
+``` 
+
+```{r graph for patents}
+tab_2 <- map_df(list(t1), tidy)
+industrydelta_2 <- patents_by_techdum %>%
+  filter(appyr==2002 | appyr==2003) %>%
+  group_by(techdum1, appyr) %>%
+  mutate(total = sum(patents)) %>%
+  summarize(year = as.factor(appyr), techdum1, total) %>% 
+  unique() %>%
+  pivot_wider(names_from = appyr, values_from = total) %>%
+  ggplot() +
+  geom_col(aes(x=techdum1, y=`2002`, color = year, fill = year), position = 'dodge') +
+  geom_col(aes(x=techdum1, y=`2003`, color = year, fill = year),  position = 'dodge') +
+  labs(title = "Figure 4 - Number of Patents by Industry in 2002 and 2003",
+       x="Industry",
+       y="Number of Patents") +
+  scale_x_continuous(breaks = (1:8))
+
+industrydelta_2
+```
+
+5. Run the following diff-in-diff regression for the aggregate data. As a control group, you can use sample == 2 (all other workers in Norway) or some other sample (see the data description). You can run alternative specifications
+$$𝑦𝑐𝑡 = 𝛼 + 𝛽0𝑃𝑜𝑠𝑡𝑡 + 𝛽1𝑇𝑟𝑒𝑎𝑡𝑐 + 𝛽2𝑇𝑟𝑒𝑎𝑡𝑐 × 𝑃𝑜𝑠𝑡𝑡 + 𝜀𝑐𝑡$$
+This is equivalent to running the t-test for the diff-in-diff (except this includes all years before 2002 and all years after 2003).
+a. What do the coefficients $𝛽1$ and $𝛽2$ tell us in this regression? Do their estimates have the signs you expected?
+
+```{r startups}
+startups_by_nace <- startups_by_nace %>%
+  mutate(startups_p100k = n_startups/n_workers * 100000) 
+
+reg1 <- felm(startups_p100k ~ treated + after + after_treated, #no fixed efects
+             data = startups_by_nace %>% filter(sample %in% c(0,2))) # sample==2 is workers outside unis
+
+reg2 <- felm(startups_p100k ~ treated + after + after_treated | 
+              n1, # field fixed effects
+             data = startups_by_nace %>% filter(sample %in% c(0,4))) # sample==4 is workers with PhD
+
+huxreg(reg1, reg2, 
+       stars = c(`*` = 0.1, `**` = 0.05, `***` = 0.01))
+
+huxreg(reg1, reg2, 
+       stars = c(`*` = 0.1, `**` = 0.05, `***` = 0.01),
+       coefs = c("Treated X post-2003" = "after_treated", # renaming variables
+                 "Post-2003" = "after",
+                 "Treated" = "treated"),
+       statistics = c("N" = "nobs", "R^2" = "r.squared")) %>% 
+      add_rows(rbind(c("Year FE", "no", "no"), #note! you need more "yes" if you have >3 models
+                 c("Control group", "All workers", "With PhD")), 
+           copy_cell_props = FALSE,
+           after = c(nrow(.) - 3))
+```
+
+```{r patents}
+
+```
+
